@@ -8,5 +8,3 @@
 #define VER_ORIGINALFILENAME_STR    "HIDKMDF.SYS"
 
 #include "common.ver"
-
-

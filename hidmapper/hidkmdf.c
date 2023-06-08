@@ -36,6 +36,7 @@ Environment:
 #define GET_NEXT_DEVICE_OBJECT(DO) \
     (((PHID_DEVICE_EXTENSION)(DO)->DeviceExtension)->NextDeviceObject)
 
+
 //
 // This type of function declaration is for Prefast for drivers. 
 // Because this declaration specifies the function type, PREfast for Drivers
@@ -47,25 +48,24 @@ Environment:
 // function type explicitly. In the following example, the DriverEntry function
 // is declared to be of type DRIVER_INITIALIZE.
 //
-DRIVER_INITIALIZE   DriverEntry;
-DRIVER_ADD_DEVICE   HidKmdfAddDevice;
-__drv_dispatchType_other
-DRIVER_DISPATCH     HidKmdfPassThrough;
-__drv_dispatchType(IRP_MJ_POWER)
-DRIVER_DISPATCH     HidKmdfPowerPassThrough;
-
-DRIVER_UNLOAD       HidKmdfUnload;
+DRIVER_INITIALIZE     DriverEntry;
+DRIVER_ADD_DEVICE     HidKmdfAddDevice;
+_Dispatch_type_(IRP_MJ_OTHER)
+DRIVER_DISPATCH       HidKmdfPassThrough;
+_Dispatch_type_(IRP_MJ_POWER)
+DRIVER_DISPATCH       HidKmdfPowerPassThrough;
+DRIVER_UNLOAD         HidKmdfUnload;
 
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text( INIT, DriverEntry )
-#pragma alloc_text( PAGE, HidKmdfAddDevice)
-#pragma alloc_text( PAGE, HidKmdfUnload)
+#pragma alloc_text( PAGE, HidKmdfAddDevice )
+#pragma alloc_text( PAGE, HidKmdfUnload )
 #endif
 
 NTSTATUS
 DriverEntry (
-    __in PDRIVER_OBJECT  DriverObject,
-    __in PUNICODE_STRING RegistryPath
+    _In_ PDRIVER_OBJECT  DriverObject,
+    _In_ PUNICODE_STRING RegistryPath
     )
 /*++
 
@@ -107,6 +107,7 @@ Return Value:
     //
     DriverObject->MajorFunction[IRP_MJ_POWER] = HidKmdfPowerPassThrough;
 
+
     DriverObject->DriverExtension->AddDevice = HidKmdfAddDevice;
     DriverObject->DriverUnload = HidKmdfUnload;
 
@@ -144,8 +145,8 @@ Return Value:
 
 NTSTATUS
 HidKmdfAddDevice(
-    __in PDRIVER_OBJECT DriverObject,
-    __in PDEVICE_OBJECT FunctionalDeviceObject
+    _In_ PDRIVER_OBJECT DriverObject,
+    _In_ PDEVICE_OBJECT FunctionalDeviceObject
     )
 /*++
 
@@ -172,6 +173,7 @@ Return Value:
 
     UNREFERENCED_PARAMETER(DriverObject);
 
+
     FunctionalDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 
     return STATUS_SUCCESS;
@@ -179,8 +181,8 @@ Return Value:
 
 NTSTATUS
 HidKmdfPassThrough(
-    __in PDEVICE_OBJECT DeviceObject,
-    __in PIRP Irp
+    _In_    PDEVICE_OBJECT  DeviceObject,
+    _Inout_ PIRP            Irp
     )
 /*++
 
@@ -211,8 +213,8 @@ Return Value:
 
 NTSTATUS
 HidKmdfPowerPassThrough(
-    __in PDEVICE_OBJECT DeviceObject,
-    __in PIRP Irp
+    _In_    PDEVICE_OBJECT  DeviceObject,
+    _Inout_ PIRP            Irp
     )
 /*++
 
@@ -248,7 +250,7 @@ Return Value:
 
 VOID
 HidKmdfUnload(
-    __in PDRIVER_OBJECT DriverObject
+    _In_ PDRIVER_OBJECT DriverObject
     )
 /*++
 

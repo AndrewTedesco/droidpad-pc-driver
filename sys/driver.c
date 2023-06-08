@@ -38,7 +38,7 @@ Revision History:
 
 --*/
 
-#include <droidpad.h>
+#include "hidusbfx2.h"
 
 #if defined(EVENT_TRACING)
 //
@@ -58,16 +58,14 @@ ULONG DebugFlag = 0xff;
 
 #ifdef ALLOC_PRAGMA
     #pragma alloc_text( INIT, DriverEntry )
-    #pragma alloc_text( PAGE, dpEvtDeviceAdd)
-    // #pragma alloc_text( PAGE, dpEvtDriverContextCleanup)
-    // #pragma alloc_text( PAGE, dpEvtTimerFunction)
-    // #pragma alloc_text( PAGE, copyHidReport)
+    #pragma alloc_text( PAGE, HidFx2EvtDeviceAdd)
+    #pragma alloc_text( PAGE, HidFx2EvtDriverContextCleanup)
 #endif
 
 NTSTATUS
 DriverEntry (
-    __in PDRIVER_OBJECT  DriverObject,
-    __in PUNICODE_STRING RegistryPath
+    _In_ PDRIVER_OBJECT  DriverObject,
+    _In_ PUNICODE_STRING RegistryPath
     )
 /*++
 
@@ -100,29 +98,16 @@ Return Value:
     WPP_INIT_TRACING( DriverObject, RegistryPath );
 
     TraceEvents(TRACE_LEVEL_INFORMATION, DBG_INIT,
-        "DroidPad Driver Built %s %s\n", __DATE__, __TIME__);
+        "HIDUSBFX2 Driver Sample\n");
 
-    WDF_DRIVER_CONFIG_INIT(&config, dpEvtDeviceAdd);
-
-    // Since there is only one control-device for all the instances
-    // of the physical device, we need an ability to get to particular instance
-    // of the device in our FilterEvtIoDeviceControlForControl. For that we
-    // will create a collection object and store filter device objects.        
-    // The collection object has the driver object as a default parent.
-    //
-    status = WdfCollectionCreate(WDF_NO_OBJECT_ATTRIBUTES, &deviceCollection);
-    if (!NT_SUCCESS(status))
-    {
-        KdPrint( ("WdfCollectionCreate failed with status 0x%x\n", status));
-        return status;
-    }
+    WDF_DRIVER_CONFIG_INIT(&config, HidFx2EvtDeviceAdd);
 
     //
     // Register a cleanup callback so that we can call WPP_CLEANUP when
     // the framework driver object is deleted during driver unload.
     //
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
-    attributes.EvtCleanupCallback = dpEvtDriverContextCleanup;
+    attributes.EvtCleanupCallback = HidFx2EvtDriverContextCleanup;
 
     //
     // Create a framework driver object to represent our driver.
@@ -137,44 +122,23 @@ Return Value:
     if (!NT_SUCCESS(status)) {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_INIT,
             "WdfDriverCreate failed with status 0x%x\n", status);
-        
+
         WPP_CLEANUP(DriverObject);
     }
-
-    status = WdfWaitLockCreate(WDF_NO_OBJECT_ATTRIBUTES, &deviceCollectionLock);
-    if (!NT_SUCCESS(status))
-    {
-		TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, "WdfWaitLockCreate(deviceCollectionLock) failed with status 0x%x\n", status);
-        return status;
-    }
-
-    status = WdfWaitLockCreate(WDF_NO_OBJECT_ATTRIBUTES, &deviceCounterLock);
-    if (!NT_SUCCESS(status))
-    {
-		TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, "WdfWaitLockCreate(deviceCounterLock) failed with status 0x%x\n", status);
-        return status;
-    }
-
-	// Reset device counter to 0
-	if (!deviceCounterReset())
-	{
-		TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, "device counter initialization failed\n");
-		return STATUS_DRIVER_INTERNAL_ERROR;
-	}
 
     return status;
 }
 
 
 NTSTATUS
-dpEvtDeviceAdd(
+HidFx2EvtDeviceAdd(
     IN WDFDRIVER       Driver,
     IN PWDFDEVICE_INIT DeviceInit
     )
 /*++
 Routine Description:
 
-    dpEvtDeviceAdd is called by the framework in response to AddDevice
+    HidFx2EvtDeviceAdd is called by the framework in response to AddDevice
     call from the PnP manager. We create and initialize a WDF device object to
     represent a new instance of toaster device.
 
@@ -196,44 +160,46 @@ Return Value:
     WDFDEVICE                     hDevice;
     PDEVICE_EXTENSION             devContext = NULL;
     WDFQUEUE                      queue;
-	DECLARE_CONST_UNICODE_STRING(CompatId, COMPATIBLE_DEVICE_ID);
+    WDF_PNPPOWER_EVENT_CALLBACKS  pnpPowerCallbacks;
     WDF_TIMER_CONFIG              timerConfig;
     WDFTIMER                      timerHandle;
-	LONG						  serialNumber;
 
     UNREFERENCED_PARAMETER(Driver);
 
     PAGED_CODE();
 
     TraceEvents(TRACE_LEVEL_INFORMATION, DBG_PNP,
-        "dpEvtDeviceAdd called\n");
-
-	serialNumber = deviceCounterIncrement();
-	if (-1 > serialNumber)
-	{
-		TraceEvents(TRACE_LEVEL_WARNING, DBG_PNP, "DeviceCount Failed- vJoyEvtDeviceAdd aborting\n");
-		return STATUS_UNSUCCESSFUL;
-	}
-	if (serialNumber>0)
-	{
-		TraceEvents(TRACE_LEVEL_WARNING, DBG_PNP, "DeviceCount returned Serial Number %d- vJoyEvtDeviceAdd aborting\n", serialNumber);
-		deviceCounterDecrement();
-		return STATUS_UNSUCCESSFUL;
-	}
+        "HidFx2EvtDeviceAdd called\n");
 
     //
-    // Tell framework this is a filter driver. Filter drivers by default are  
+    // Tell framework this is a filter driver. Filter drivers by default are
     // not power policy owners. This works well for this driver because
     // HIDclass driver is the power policy owner for HID minidrivers.
     //
     WdfFdoInitSetFilter(DeviceInit);
 
-	// Child device's compatible ID is "hid_device_system_game"
-	// Additional ones may be added below
-	WdfPdoInitAddCompatibleID(DeviceInit, &CompatId);
+    //
+    // Initialize pnp-power callbacks, attributes and a context area for the device object.
+    //
+    //
+    WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpPowerCallbacks);
+
+    //
+    // For usb devices, PrepareHardware callback is the to place select the
+    // interface and configure the device.
+    //
+    pnpPowerCallbacks.EvtDevicePrepareHardware = HidFx2EvtDevicePrepareHardware;
+
+    //
+    // These two callbacks start and stop the wdfusb pipe continuous reader
+    // as we go in and out of the D0-working state.
+    //
+    pnpPowerCallbacks.EvtDeviceD0Entry = HidFx2EvtDeviceD0Entry;
+    pnpPowerCallbacks.EvtDeviceD0Exit  = HidFx2EvtDeviceD0Exit;
+
+    WdfDeviceInitSetPnpPowerEventCallbacks(DeviceInit, &pnpPowerCallbacks);
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, DEVICE_EXTENSION);
-	attributes.EvtCleanupCallback = dpEvtDeviceContextCleanup;
 
     //
     // Create a framework device object.This call will in turn create
@@ -249,38 +215,8 @@ Return Value:
 
     devContext = GetDeviceContext(hDevice);
 
-	///////////  Add this device to the FilterDevice collection. /////////////
-    // 
-    //
-    WdfWaitLockAcquire(deviceCollectionLock, NULL);
-    //
-    // WdfCollectionAdd takes a reference on the item object and removes
-    // it when you call WdfCollectionRemove.
-    //
-    status = WdfCollectionAdd(deviceCollection, hDevice);
-    if (!NT_SUCCESS(status)) 
-	{
-        KdPrint( ("WdfCollectionAdd failed with status code 0x%x\n", status));
-		return status;
-    }
-
-    WdfWaitLockRelease(deviceCollectionLock);
-	/////////////////////////////////////////////////////////////////////////
-
-	// Set all JS values to sane ones
-	resetHidReport(&(devContext->inputs));
-
-	/////////// Create a control device /////////////////////////////////////
-    status = dpCreateControlDevice(hDevice);
-    if (!NT_SUCCESS(status))
-	{
-        KdPrint( ("dpCreateControlDevice failed with status 0x%x\n", status));
-		return status;
-    }
-	/////////////////////////////////////////////////////////////////////////
-    
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchParallel);
-    queueConfig.EvtIoInternalDeviceControl = dpEvtInternalDeviceControl;
+    queueConfig.EvtIoInternalDeviceControl = HidFx2EvtInternalDeviceControl;
 
     status = WdfIoQueueCreate(hDevice,
                               &queueConfig,
@@ -312,7 +248,7 @@ Return Value:
     status = WdfIoQueueCreate(hDevice,
                               &queueConfig,
                               WDF_NO_OBJECT_ATTRIBUTES,
-                              &devContext->TimerMsgQueue
+                              &devContext->InterruptMsgQueue
                               );
 
     if (!NT_SUCCESS(status)) {
@@ -321,31 +257,36 @@ Return Value:
         return status;
     }
 
-    //	Create a timer that completes IOCTL_HID_READ_REPORT pending requests
-	//	Calback function will be called by this timer every READ_REPORT_MILLIS
-    WDF_TIMER_CONFIG_INIT(&timerConfig, dpEvtTimerFunction);
+    //
+    // Create a timer to handle debouncing of switchpack
+    //
+    WDF_TIMER_CONFIG_INIT(
+                          &timerConfig,
+                          HidFx2EvtTimerFunction
+                          );
     timerConfig.AutomaticSerialization = FALSE;
-	timerConfig.Period = READ_REPORT_MILLIS;
 
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
     attributes.ParentObject = hDevice;
-    status = WdfTimerCreate( &timerConfig,&attributes,&timerHandle);
-    if (!NT_SUCCESS(status)) 
-	{
-        TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, "WdfTimerCreate failed status:0x%x\n", status);
+    status = WdfTimerCreate(
+                            &timerConfig,
+                            &attributes,
+                            &timerHandle
+                            );
+    if (!NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP,
+            "WdfTimerCreate failed status:0x%x\n", status);
         return status;
     }
-	WdfTimerStart(timerHandle, 100);
- 	/////////////////////////////////////////////////////////////////////////////////////////
 
-    // devContext->DebounceTimer = timerHandle;
+    devContext->DebounceTimer = timerHandle;
     return status;
 }
 
 
 VOID
-dpEvtDriverContextCleanup(
-    IN WDFDRIVER Driver
+HidFx2EvtDriverContextCleanup(
+    IN WDFOBJECT Object
     )
 /*++
 Routine Description:
@@ -363,12 +304,12 @@ Return Value:
 
 --*/
 {
-    UNREFERENCED_PARAMETER(Driver);
+    PAGED_CODE ();
+    UNREFERENCED_PARAMETER(Object);
 
-    // TraceEvents(TRACE_LEVEL_INFORMATION, DBG_INIT, "Exit dpEvtDriverContextCleanup\n");
+    TraceEvents(TRACE_LEVEL_INFORMATION, DBG_INIT, "Exit HidFx2EvtDriverContextCleanup\n");
 
-    WPP_CLEANUP( WdfDriverWdmGetDriverObject( Driver ));
-
+    WPP_CLEANUP(WdfDriverWdmGetDriverObject((WDFDRIVER) Object));
 }
 
 /**
